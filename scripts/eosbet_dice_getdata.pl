@@ -47,11 +47,14 @@ die($DBI::errstr) unless $dbhw;
 
 
 my $block_num = 0;
+my $max_seq = 0;
 {
-    my $r = $dbhw->selectall_arrayref('SELECT MAX(block_num) FROM EOSBET_DICE_RECEIPTS');
+    my $r = $dbhw->selectall_arrayref
+        ('SELECT MAX(block_num), MAX(global_action_seq) FROM EOSBET_DICE_RECEIPTS');
     if( defined($r->[0][0]) )
     {
         $block_num = $r->[0][0];
+        $max_seq = $r->[0][1];
     }
 }
 
@@ -61,37 +64,45 @@ my $sth_getreceipts = $dbhr->prepare
      ' DATE(block_time) AS bd, block_time, trx_id, ' .
      ' jsdata ' .
      'FROM EOSIO_ACTIONS ' .
-     'WHERE actor_account = ? AND action_name = ? AND block_num > ? ' .
+     'WHERE actor_account = ? AND action_name = ? AND block_num >= ? ' .
+     ' AND global_action_seq > ? ' .
      'ORDER BY block_num LIMIT 100');
 
 my $sth_addreceipt = $dbhw->prepare
     ('INSERT INTO EOSBET_DICE_RECEIPTS ' . 
      '(global_action_seq, block_num, block_time, trx_id, bettor, ' .
      ' curr_issuer, currency, bet_amt, payout, roll_under, random_roll) ' .
-     'VALUES(?,?,?,?,?,?,?,?,?,?,?)');
+     'VALUES(?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE block_num=?');
 
 my @addreceipt_columns =
     qw(global_action_seq block_num block_time trx_id bettor
-       curr_issuer currency bet_amt payout roll_under random_roll);
+       curr_issuer currency bet_amt payout roll_under random_roll
+       block_num);
 
 my $processing_date = '';
 my $rowcnt = 0;
 
 while(1)
 {
-    $sth_getreceipts->execute($diceacc, $rcpt_action, $block_num);
+    $sth_getreceipts->execute($diceacc, $rcpt_action, $block_num, $max_seq);
 
     my $r = $sth_getreceipts->fetchall_arrayref({});
     my $nrows = scalar(@{$r});
-    last if($nrows == 0);
-
+    last if $nrows == 0;
+    
     foreach my $row (@{$r})
     {
+        my $seq = $row->{'global_action_seq'};
+        if( $seq > $max_seq )
+        {
+            $max_seq = $seq;
+        }
+        
         my $action = eval { $json->decode($row->{'jsdata'}) };
         if($@)
         {
             printf("ERR SEQ=%d ACTION=%s ACTOR=%s\n",
-                   $row->{'global_action_seq'},
+                   $seq,
                    $row->{'action_name'}, $row->{'actor_account'});
             next;
         }        
@@ -103,6 +114,8 @@ while(1)
         }
 
         my $data = $action->{'action_trace'}{'act'}{'data'};
+
+        next unless ref($data) eq 'HASH';
         
         $row->{'bettor'} = $data->{'bettor'};
         $row->{'curr_issuer'} = $data->{'amt_contract'};
@@ -128,7 +141,6 @@ while(1)
     }
     
     $dbhw->commit();
-
     print("$rowcnt\n");
 }
 
