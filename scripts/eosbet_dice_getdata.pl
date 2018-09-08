@@ -66,7 +66,7 @@ my $sth_getreceipts = $dbhr->prepare
      'FROM EOSIO_ACTIONS ' .
      'WHERE actor_account = ? AND action_name = ? AND block_num >= ? ' .
      ' AND global_action_seq > ? ' .
-     'ORDER BY block_num LIMIT 100');
+     'ORDER BY block_num LIMIT 1000');
 
 my $sth_addreceipt = $dbhw->prepare
     ('INSERT INTO EOSBET_DICE_RECEIPTS ' . 
@@ -101,7 +101,7 @@ while(1)
         my $action = eval { $json->decode($row->{'jsdata'}) };
         if($@)
         {
-            printf("ERR SEQ=%d ACTION=%s ACTOR=%s\n",
+            printf("Error reading JSON: SEQ=%d ACTION=%s ACTOR=%s\n",
                    $seq,
                    $row->{'action_name'}, $row->{'actor_account'});
             next;
@@ -115,7 +115,11 @@ while(1)
 
         my $data = $action->{'action_trace'}{'act'}{'data'};
 
-        next unless ref($data) eq 'HASH';
+        if( ref($data) ne 'HASH' )
+        {
+            printf("Unreadable data in %s\n", $row->{'trx_id'});
+            next;
+        }                                                         
         
         $row->{'bettor'} = $data->{'bettor'};
         $row->{'curr_issuer'} = $data->{'amt_contract'};
