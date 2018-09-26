@@ -4,6 +4,7 @@ use JSON;
 use Getopt::Long;
 use DBI;
 
+$| = 1;
 
 my $dsnr = 'DBI:mysql:database=eosio;host=localhost';
 my $dbr_user = 'eosioro';
@@ -14,8 +15,6 @@ my $dbw_user = 'eosgames';
 my $dbw_password = 'Einie4xa';
 
 my $diceacc = 'eosbetdice11';
-my $rcpt_action = 'betreceipt';
-
 
 my $json = JSON->new;
 
@@ -56,16 +55,24 @@ my $max_seq = 0;
         $block_num = $r->[0][0];
         $max_seq = $r->[0][1];
     }
+    else
+    {
+        my $sth = $dbhr->prepare
+            ('SELECT MIN(block_num) FROM EOSIO_ACTIONS WHERE actor_account = ?');
+        $sth->execute($diceacc);
+        $r = $sth->fetchall_arrayref();
+        $block_num = $r->[0][0];
+    }            
 }
 
 my $sth_getreceipts = $dbhr->prepare
     ('SELECT ' .
      ' global_action_seq, block_num, ' .
-     ' DATE(block_time) AS bd, block_time, trx_id, ' .
+     ' DATE(block_time) AS bd, block_time, action_name, trx_id, ' .
      ' jsdata ' .
-     'FROM EOSIO_ACTIONS ' .
-     'WHERE actor_account = ? AND action_name = ? AND block_num >= ? ' .
-     ' AND global_action_seq > ? ' .
+     'FROM EOSIO_ACTIONS USE INDEX (EOSIO_ACTIONS_I08) ' .
+     'WHERE actor_account = ? AND block_num >= ? AND action_name IN (\'betreceipt\', \'resolvebet\')' .
+     ' AND global_action_seq > ? AND irreversible=1 AND status=0 ' .
      'ORDER BY block_num LIMIT 1000');
 
 my $sth_addreceipt = $dbhw->prepare
@@ -79,12 +86,21 @@ my @addreceipt_columns =
        curr_issuer currency bet_amt payout roll_under random_roll
        block_num);
 
+
+my $sth_addresolve = $dbhw->prepare
+    ('INSERT INTO EOSBET_DICE_RESOLVED_BETS ' . 
+     '(global_action_seq, block_num, block_time, trx_id) ' .
+     'VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE block_num=?');
+
+my @addresolve_columns =
+    qw(global_action_seq block_num block_time trx_id block_num);
+
 my $processing_date = '';
 my $rowcnt = 0;
 
 while(1)
 {
-    $sth_getreceipts->execute($diceacc, $rcpt_action, $block_num, $max_seq);
+    $sth_getreceipts->execute($diceacc, $block_num, $max_seq);
 
     my $r = $sth_getreceipts->fetchall_arrayref({});
     my $nrows = scalar(@{$r});
@@ -97,49 +113,63 @@ while(1)
         {
             $max_seq = $seq;
         }
-        
-        my $action = eval { $json->decode($row->{'jsdata'}) };
-        if($@)
-        {
-            printf("Error reading JSON: SEQ=%d ACTION=%s ACTOR=%s\n",
-                   $seq,
-                   $row->{'action_name'}, $row->{'actor_account'});
-            next;
-        }        
-        
-        if( $row->{'bd'} ne $processing_date )
-        {
-            $processing_date = $row->{'bd'};
-            print("Processing $processing_date\n");
-        }
 
-        my $data = $action->{'action_trace'}{'act'}{'data'};
-
-        if( ref($data) ne 'HASH' )
+        if( $row->{'action_name'} eq 'betreceipt' )
         {
-            printf("Unreadable data in %s\n", $row->{'trx_id'});
-            next;
-        }                                                         
+            my $action = eval { $json->decode($row->{'jsdata'}) };
+            if($@)
+            {
+                printf("Error reading JSON: SEQ=%d ACTION=%s ACTOR=%s\n",
+                       $seq,
+                       $row->{'action_name'}, $row->{'actor_account'});
+                next;
+            }
         
-        $row->{'bettor'} = $data->{'bettor'};
-        $row->{'curr_issuer'} = $data->{'amt_contract'};
-        my $asset = $data->{'bet_amt'};
-        my ($amount, $currency) = split(/\s/, $asset);
-        $row->{'currency'} = $currency;
-        $row->{'bet_amt'} = $amount;
-        $asset = $data->{'payout'};
-        ($amount, $currency) = split(/\s/, $asset);
-        $row->{'payout'} = $amount;
-        $row->{'roll_under'} = $data->{'roll_under'};
-        $row->{'random_roll'} = $data->{'random_roll'};
-        
-        my @args;
-        foreach my $col (@addreceipt_columns)
-        {
-            push(@args, $row->{$col});
+            if( $row->{'bd'} ne $processing_date )
+            {
+                $processing_date = $row->{'bd'};
+                print("Processing $processing_date\n");
+            }
+            
+            my $data = $action->{'action_trace'}{'act'}{'data'};
+            
+            if( ref($data) ne 'HASH' )
+            {
+                printf("Unreadable data in %s\n", $row->{'trx_id'});
+                next;
+            }                                                         
+            
+            $row->{'bettor'} = $data->{'bettor'};
+            $row->{'curr_issuer'} = $data->{'amt_contract'};
+            my $asset = $data->{'bet_amt'};
+            my ($amount, $currency) = split(/\s/, $asset);
+            $row->{'currency'} = $currency;
+            $row->{'bet_amt'} = $amount;
+            $asset = $data->{'payout'};
+            ($amount, $currency) = split(/\s/, $asset);
+            $row->{'payout'} = $amount;
+            $row->{'roll_under'} = $data->{'roll_under'};
+            $row->{'random_roll'} = $data->{'random_roll'};
+            
+            my @args;
+            foreach my $col (@addreceipt_columns)
+            {
+                push(@args, $row->{$col});
+            }
+            
+            $sth_addreceipt->execute(@args);
         }
-        
-        $sth_addreceipt->execute(@args);
+        else
+        {
+            # resolvebet
+            my @args;
+            foreach my $col (@addresolve_columns)
+            {
+                push(@args, $row->{$col});
+            }
+            
+            $sth_addresolve->execute(@args);
+        }
         $block_num = $row->{'block_num'};
         $rowcnt++;
     }
@@ -152,4 +182,5 @@ while(1)
 $dbhr->disconnect();
 $dbhw->disconnect();
 
+print("Finished\n");
 
