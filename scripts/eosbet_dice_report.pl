@@ -312,11 +312,29 @@ sub add_series
 }
 
 
+$dbh->do
+    ('CREATE TEMPORARY TABLE WINNERS_LOSERS ' .
+     'SELECT bettor, COUNT(*) as nbets, SUM(bet_amt) as sum_bets, ' .
+     'SUM(payout) as sum_payouts, SUM(payout)-SUM(bet_amt) as profit ' .
+     'FROM EOSBET_DICE_RECEIPTS ' . $where_condition .
+     'GROUP BY bettor');
+
+
 add_series('All_rolls', 'Count of all rolls per result');
 add_series('500plus_rolls',
   'Count of rolls per result where wager is 500 EOS or higher',
   'bet_amt >= 500');
 
+add_series('top_winners_rolls',
+           'Count of rolls per result for winners of 3000 EOS or more',
+           'bettor IN (SELECT bettor from WINNERS_LOSERS where profit >= 3000)');
+
+add_series('top_losers_rolls',
+           'Count of rolls per result for losers of 3000 EOS or more',
+           'bettor IN (SELECT bettor from WINNERS_LOSERS where profit <= -3000)');
+
+
+# Winners and Losers
 {
     my $col = 0;
     my $row = 0;
@@ -356,9 +374,9 @@ add_series('500plus_rolls',
 
 
     my $r = $dbh->selectall_arrayref
-        ('SELECT bettor, COUNT(*), SUM(bet_amt), SUM(payout), SUM(payout)-SUM(bet_amt) ' .
-         'FROM EOSBET_DICE_RECEIPTS ' . $where_condition .
-         'GROUP BY bettor ORDER BY SUM(payout)-SUM(bet_amt) DESC');
+        ('SELECT bettor, nbets, sum_bets, sum_payouts, profit ' .
+         'FROM WINNERS_LOSERS ' .
+         'ORDER BY profit DESC');
     foreach my $dr (@{$r})
     {
         $col = 0;
