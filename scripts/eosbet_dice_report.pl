@@ -334,65 +334,6 @@ add_series('top_losers_rolls',
            'bettor IN (SELECT bettor from WINNERS_LOSERS where profit <= -3000)');
 
 
-# Winners and Losers
-{
-    my $col = 0;
-    my $row = 0;
-
-    my $worksheet = $workbook->add_worksheet('Winners_Losers');
-    
-    $worksheet->set_column($col, $col, 20);
-    $col++;
-    $worksheet->set_column($col, $col, 15);
-    $col++;
-    $worksheet->set_column($col, $col, 15);
-    $col++;
-    $worksheet->set_column($col, $col, 15);
-    $col++;
-    $worksheet->set_column($col, $col, 15);
-
-    $col = 0;
-    my $shape = $workbook->add_shape
-        ( type => 'rect', text => 'Winners and losers',
-          scale_x => 15, scale_y => 0.8,
-          line => 'FFFFFF',
-          'format' => $f_descr );
-    $worksheet->insert_shape( $row, $col, $shape );
-    $row += 3;
-    
-    $col = 0;
-    $worksheet->write($row, $col, 'Name', $f_tblheader);
-    $col++;
-    $worksheet->write($row, $col, 'Rolls', $f_tblheader);
-    $col++;
-    $worksheet->write($row, $col, 'Wagers, EOS', $f_tblheader);
-    $col++;
-    $worksheet->write($row, $col, 'Payouts, EOS', $f_tblheader);
-    $col++;
-    $worksheet->write($row, $col, 'Profit, EOS', $f_tblheader);
-    $row++;
-
-
-    my $r = $dbh->selectall_arrayref
-        ('SELECT bettor, nbets, sum_bets, sum_payouts, profit ' .
-         'FROM WINNERS_LOSERS ' .
-         'ORDER BY profit DESC');
-    foreach my $dr (@{$r})
-    {
-        $col = 0;
-        $worksheet->write($row, $col, $dr->[0]);
-        $col++;
-        $worksheet->write_number($row, $col, $dr->[1]);
-        $col++;
-        $worksheet->write_number($row, $col, $dr->[2], $f_money);
-        $col++;
-        $worksheet->write_number($row, $col, $dr->[3], $f_money);        
-        $col++;
-        $worksheet->write_number($row, $col, $dr->[4], $f_money);
-        $row++;
-    }
-}
-
 
 $dbh->disconnect();
 $workbook->close();
