@@ -7,7 +7,7 @@ use Excel::Writer::XLSX;
 use Excel::Writer::XLSX::Utility;
 
 
-my $dsn = 'DBI:mysql:database=eosgames;host=localhost';
+my $dsn = 'DBI:MariaDB:database=eosgames;host=localhost';
 my $db_user = 'eosgames';
 my $db_password = 'Einie4xa';
 
@@ -38,8 +38,7 @@ if( not $ok or scalar(@ARGV) > 0 or
 
 
 my $dbh = DBI->connect($dsn, $db_user, $db_password,
-                       {'RaiseError' => 1, AutoCommit => 0,
-                        mysql_server_prepare => 1});
+                       {'RaiseError' => 1, AutoCommit => 0});
 die($DBI::errstr) unless $dbh;
 
 my $where_condition = ' WHERE block_time < DATE(\'' . $enddate . '\')';
