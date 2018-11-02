@@ -3,6 +3,7 @@ use warnings;
 use JSON;
 use Getopt::Long;
 use DBI;
+use Compress::LZ4;
 
 $| = 1;
 
@@ -119,7 +120,14 @@ while(1)
 
         if( $row->{'action_name'} eq 'betreceipt' )
         {
-            my $action = eval { $json->decode($row->{'jsdata'}) };
+            my $jsdata = $row->{'jsdata'};
+            if( unpack('A', $jsdata) eq 'z' ) # LZ4 compressed data
+            {
+                my @x = unpack('Aa*', $jsdata);
+                $jsdata = Compress::LZ4::decompress($x[1]);
+            }
+            
+            my $action = eval { $json->decode($jsdata) };
             if($@)
             {
                 printf("Error reading JSON: SEQ=%d ACTION=%s ACTOR=%s\n",
